@@ -1,0 +1,511 @@
+---
+title: "S&DS 230e Final Project"
+author: "Melody Gebremedhin, Jake Williams, Isaac Eitan, and Esha Bhattacharya"
+date: "Sunday, August 7, 2022"
+output:
+  html_document:
+    fig_height: 6
+    fig_width: 8
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+## Part I: Introduction
+
+Social welfare, or the assistance of disadvantaged groups, should matter to all: for the last 40 years, income inequality within nations has contributed to an increasingly greater share of global inequality ([1](https://wir2022.wid.world/executive-summary/)). Federal welfare programs, then, are a topic of great interest. Therefore, using data from a 2017 international social survey by GESIS ([2](https://search.gesis.org/research_data/ZA6980)), this project seeks to statistically characterize the relationship between various demographics and attitudes—on such things as trustworthiness of people, life satisfaction, and health status—and attitude towards social welfare. We hope that understanding which factors and beliefs influence people’s responses towards the social distribution of resources—national and worldwide—can ultimately provide insight in how people may be made more reactive to this issue.
+
+## Part II: Data Overview
+
+### About Our Data:
+
+The original dataset, saved as a **.sav** file, contains 356 variables of various metric types and coded from the ISSP’s cross-national annual surveys on social science topics. It can be found here ([2](https://search.gesis.org/research_data/ZA6980)).
+
+### Variables:
+
+Of the 356 variables in the full dataset , we chose 9 variables, both continuous and categorical, that are especially interesting: they relate to daily activities of participants and different essential beliefs.  This diverse set of variables will give us insight into the factors associated with attitude toward social welfare.
+
+**Continous Variables:**
+
+* DEGREE: Highest completed education level; derived categories created for international comparison.  Scale from 1 to 7, ranging from “No formal education” to “Upper level tertiary (Master, Doctor)” (references v67 in the original dataset).
+
+* AGE: Age of respondent; ranges from 16 to 94. 
+
+* PARTY_LR: Party voted for in the last general election on a left-right continuum. Derived from “nat_PRTY” for international comparison. Scale from 1 to 5, ranging from “Far left (communist etc.)” to “Far right (fascist etc.)” (references v67 in the original dataset).
+
+* trustPpl: Response to “How often people try to take advantage and how often try to be fair?”. Scale from 1 to 4, ranging from “Try to take advantage almost all of the time” to “Try to be fair almost all of the time” (derived for the project from dataset variable v34).
+
+* satisfied:Response to “Life in general: How satisfied on the whole?”. Scale from -3 to 3, ranging from “Completely dissatisfied” to “Completely satisfied” (derived for project from dataset variable v58).
+
+* health: Self-reported health status in general. Scale from 1 to 5, ranging from “Poor” to “Excellent” (derived for the project from dataset variable v54).
+
+* SWS: Short for “Social Welfare Score'', a composite score of attitude towards social welfare. Scale of 4 to 20, in which a higher score indicates a more positive attitude towards social welfare (derived for the project from dataset variables v11, v12, v13, and v14).
+
+**Categorical Variables:**
+
+* country: Filled by researcher; country where the survey response took place.
+
+* policeFrF: Short for “**police** as **fr**iends or **f**amily”. Binary of “Not in relationship” and  “Close Friend / Family”. Derived for project from dataset variable 'v9'. 
+
+More information about the selected variables that we use from our dataset can be found in the dataset’s variable report ([3](https://search.gesis.org/research_data/ZA6980)). 
+
+### Data Cleaning I: Fixing and choosing desired variables
+
+Each variable in the dataset was encoded as a factor, so the cleaning process generally consisted of: 
+
+* Preparing continuous factors for numeric conversion by renaming factor levels to integers,
+
+* Using subtraction to the numeric answers—if needed—to change the representation of lower or higher values, 
+
+* Creating a new, smaller dataset that included our selected variables of interest,
+
+* Converting categorical factors to strings and writing lucid names.
+
+For PARTY_LR, we left out people who weren't in the left-right spectrum (independent, no answer).  For policeFrF and the variables used to create SWS, values of 8 (“No answer”) and 9 (“Can’t choose”) were removed. And for more facile analysis, we selected 9 countries across continents to understand how different views vary across global regions. For example, for ´health´, we subtracted 6 to all the values of v58 to make higher values mean better health. A more detailed description of the data cleaning process is seen below.
+
+**The libraries we used were:**
+```{r, warning = F}
+library(foreign) #To read a .sav file into R
+library(car)
+library(corrplot)
+library(PerformanceAnalytics)
+library(leaps)
+source("http://www.reuningscherer.net/s&ds230/Rfuncs/regJDRS.txt")
+```
+
+```{r, warning = F}
+#Get data
+social <- 
+  read.spss("/Users/isaaceitan/Desktop/Project/ZA6980_v2-0-0.sav", 
+            to.data.frame = T)
+```
+```{r}
+#Choosing variables & selecting for complete observations
+social <- na.omit(social[ , c("country", "DEGREE", "AGE", "PARTY_LR", 
+                             "v9", "v11", "v12", "v13", "v14", "v34", 
+                             "v54", "v58")])
+
+#1 - cleaning country
+social$country <- as.character(social$country)
+# isolating country name
+for (i in 1:length(social$country)) {
+  social$country[i] <- substring(social$country[i], 4, 
+                                 nchar(social$country[i]))
+}
+# selecting countries across continents
+social <- social[social$country %in% c("Germany", "India", "United States", 
+                                       "Russia", "Mexico", "Japan", 
+                                       "Australia", "Israel", 
+                                       "South Africa"), ]
+
+#2 - cleaning AGE
+# preparing factors for conversion to numeric data
+social$AGE <- as.character(social$AGE)
+social$AGE <- gsub("89 (US: 89 years or older)", "89", social$AGE)
+# convert to integers
+social$AGE <- as.numeric(social$AGE)
+
+#3 - cleaning DEGREE
+social$DEGREE <- as.numeric(social$DEGREE)
+
+#4 - cleaning PARTY_LR
+# isolate first 5 levels of PARTY_LR: far left to far right
+social <- social[social$PARTY_LR %in% levels(social$PARTY_LR)[1:5], ]
+social$PARTY_LR <- as.numeric(social$PARTY_LR)
+
+#5 - cleaning v9: friends with policeman or not
+# isolate first 4 levels of v9: "family" to "don't know one"
+social <- social[social$v9 %in% levels(social$v9)[1:4], ]
+# convert v9 to numeric
+social$v9 <- as.numeric(social$v9)
+# create new varible with binary: close friend or family = 1; acquantance or don't know one = 0
+social$policeFrF <- recode(social$v9, "1 = 'Close Friend / Family';
+                           2 = 'Close Friend / Family'; 
+                           3 = 'Not in relationship';
+                           4 = 'Not in relationship'")
+
+
+#6 - cleaning v34: ppl are fair vs. taking advantage
+social$trustPpl <- as.numeric(social$v34)
+
+#7 - cleaning v58: satisfaction in life
+social$v58 <- as.numeric(social$v58)
+# recode for scale centered at 0 & higher values = more satisfied
+social$satisfied <- recode(social$v58, "1 = 3; 2 = 2; 3 = 1; 4 = 0; 5 = -1; 6 = -2; 7 = -3")
+
+#8 - cleaning V54: health
+#set higher values to better health
+social$health <- (6 - as.numeric(social$v54))
+
+```
+
+### Data Cleaning II: Adding a new variable
+
+SWS was created from original dataset variables v11 through v14. In order, these questions ask for the extent of agreement or disagreement with the statements, “Differences in income are too large”, “Differences in people's standard of living should be small in fair societies”, ‘“It is the responsibility of the government to reduce the differences in income between people with high incomes and those with low incomes.”, and “Social benefits make people lazy.” 
+
+For v11, v12, and v13, a response of agreement indicated favor towards social welfare, while for v14, a response of agreement indicated disfavor towards welfare. To create SWS, then, we needed to either switch the scale for v14 alone, or for the other three variables. In the interest of having a higher score reflect greater support for social welfare, we elected to switch the scale for v11, v12, and v13 to create SWS.
+
+
+```{r}
+# creating social welfare attitude score (SWS)
+social$SWS <- (6 - as.numeric(social$v11)) + (6 - as.numeric(social$v12)) + 
+              (6 - as.numeric(social$v13)) + as.numeric(social$v14)
+
+```
+
+### Data Cleaning III: Thoughts and challenges
+
+To ensure our data provide accurate results, it must be complete. The final dataset, ´social´, has complete entries in all rows and consisted of 7607 people that answered the nine selected predictors.
+
+*Here is the head and dimensions of the final dataset, called 'social':*
+```{r, echo = FALSE}
+#final variables in final dataset
+social <- na.omit(social[, c("country", "DEGREE", "AGE", "PARTY_LR", 
+                             "policeFrF", "trustPpl", "satisfied", 
+                             "health", "SWS")]) 
+
+#attach
+attach(social)
+
+#basic features of dataset
+head(social, 3)
+dim(social)
+```
+Some of the challenges we encountered were (1) creating SWS, in which he had to shift the some of the used variables to make higher scores indicate greater support, (2) crafting an effective, short loop which isolated the desired country names, (3) and figuring out how to scale ´policeFrF´. In the end, we decided to make ´policeFrF´ a boolean vector, so that data and results can be easily shown. 
+
+
+## Part III: Results and Analysis
+
+### CASE STUDY 1: Which statistics are related to each other?
+#### *Use of correlation and scatterplots*
+
+```{r}
+#We create 'social2' to have all the continous variables in one dataset
+social2 <- social[, c("SWS", "DEGREE", "AGE", "health", "PARTY_LR", 
+                      "trustPpl", "satisfied")]
+```
+
+To investigate the possible relations among the continuous variables, we retrieved the pairwise correlations between the continuous variables in our dataset (in doing so, we are assuming the pairs have linear relationships.)
+
+```{r, echo = FALSE}
+#correlations among continuous variables
+cor1 <- round(cor(social2), 2)
+
+#test of significance of correlations for these variables using 95% CIs
+sigcorr <- cor.mtest(social2, conf.level = 0.95)
+
+corrplot.mixed(cor1, lower.col="black", upper = "ellipse", tl.col = "black", 
+               number.cex= 0.7, order = "hclust", tl.pos = "lt", 
+               tl.cex= 0.7, p.mat = sigcorr$p, sig.level = .05)
+```
+*Of the sixteen significant pairwise correlations, nine are positive and seven are negative. Six of the pairwise correlations are not statistically significant. The strongest positive correlations are between ‘DEGREE’ and ‘trustPpl’, ‘DEGREE’ and ‘satisfied’, and ‘health’ and ‘satisfied’. For instance, it makes sense that ‘health’ and ‘satisfied’ are positively correlated as we expect that people who have a good level of health are satisfied with life, for health is an essential aspect of everyone’s life. The strongest negative correlations are between ‘AGE’ and ‘health’, ‘SWS’ and ‘satisfied’, and ‘SWS’ and ‘PARTY_LR’; the latter two are of particular interest for this project and shall be probed further in Case Study IV.* 
+
+For now, we will more closely examine two of these relationships: that between ‘health’ and ‘satisfied’, and that between ‘PARTY_LR’ and ‘SWS’. We do so via scatterplots, and since our data is contained to discrete whole number coordinates, we employ jittering to visualize the share of data contained at each discrete data point, and hence a relative measure of the responses for each pair of answers is seen, even though a linear correlation is not easily seen.
+
+```{r, echo = FALSE}
+
+#scatterplot: satisfied vs health
+plot(jitter(health), 
+     jitter(satisfied), 
+     pch = 19, 
+     col = "green", 
+     xlab = "Self-reported health level", 
+     ylab = "Satisfaction level in life")
+mtext("Self reported health level (5 = excellent)", 
+      cex = 1, 
+      line = 1)
+#Reporting the sample correlation to two decimal places
+mtext(paste0("Sample Correlation = ", round(cor(satisfied, health), 2)), 
+      cex = 0.85, line = 0)
+
+#scatterplot: 'PARTY_LR' vs SWS
+plot(jitter(social2$PARTY_LR), 
+     jitter(SWS), 
+     pch = 19, 
+     col = "purple", 
+     xlab = "Party membership (5 = far right)", 
+     ylab = "Social Welfare Score")
+#top title (plot as a whole)
+mtext("Social Welfare Score (higher = more supportive)", 
+      cex = 1, 
+      line = 1)
+#title which reports the sample correlation to two decimal places
+mtext(paste0("Sample Correlation = ", 
+             round(cor(social2$PARTY_LR, SWS), 2)), 
+      cex = 0.85, 
+      line = 0)
+```
+
+
+*In the left-hand plot, observe the highest concentration of data points in the upper-right, followed by the lower-left. This shows that there is a positive association between ‘satisfied’ and ‘health’, which tracks with the positive reported correlation (0.34). *
+
+*In the right plot, As PARTY_LR increases from 1 to 4, we clearly see the corresponding decrease in minimum SWS. This negative association tracks with the reported negative correlation of -0.21. Interestingly, the range and median of SWS values for PARTY_LR = 5 appears to be closest to that of PARTY_LR = 1. What’s more, these tail-ends of PARTY_LR have noticeably fewer data points and a narrower SWS range than the other PARTY_LR groups. Therefore, despite being on opposite ends of the spectrum, the far-left respondents and far-right respondents appear to have some notable commonalities in SWS scores.*
+
+We then corroborated the correlation between ‘health’ and ‘satisfied’ and that between ‘PARTY_LR’ and ‘SWS’ with a Pearson correlation test. 
+
+```{r, echo = F}
+#correlation test between 'health' & 'satisfied'
+cor.test(health, satisfied)
+
+#correlation test between 'PARTY_LR' and 'SWS'
+cor.test(social$PARTY_LR, SWS)
+```
+
+*For both correlations: since the p-value is well below 0.05 (<2.2 x 10^-16) and the 95% confidence interval for the true correlation does not contain zero, we reject the null hypothesis that the true correlation is 0. Indeed, we conclude that the positive correlation between ‘health’ and ‘satisfaction’ and the negative correlation between ‘PARTY_LR’ and ‘SWS’ are both statistically significant. *
+
+In this first case study, we sought to characterize the relationships between the continuous variables in our dataset. The strongest correlation was between health status and age (which was not surprising). Following that, life satisfaction and health status had the strongest positive correlation while the party voted for in the last general election and the social welfare attitude score had the strongest negative correlations. Both of these were determined to be statistically significant by Pearson’s correlation test. Other studies have indeed shown that healthier people are happier ([4](https://arxiv.org/abs/1112.5802)); after all, healthier people arguably have less to worry about and a greater ability to do certain activities. The negative correlation between PARTY_LR and SWS is also unexpected. Conservative values are characteristically individualist and, likewise, against public provision ([5](http://spicker.uk/social-policy/politics.htm)). On the other hand, liberal values tend to be collectivist and, likewise, in favor of public provision (i.e., social welfare) ([5](http://spicker.uk/social-policy/politics.htm)). 
+
+**Given that the next case studies will have ‘SWS’ as the response variable,** we’ll take a closer look by obtaining its summary statistics, a histogram of its values, and its normal quantile plot.
+```{r, echo = FALSE}
+#summary
+summary(SWS)
+
+#histogram
+hist(SWS, main = "Social Welfare Score", 
+     xlab = "Values of 'SWS'", 
+     col = "lightgreen")
+
+#normal quantile plot of `sws'
+qqPlot(SWS, 
+       main = "Normal Quantile Plot of Social Welfare Score", 
+       col = "red", 
+       pch = 19)
+```
+*The shape of the histogram is characteristic of a truncated normal distribution. Since the upper-bound of ‘SWS’ is set to 20, the right half of (what would have been a) normal distribution is cut off prematurely, hence the shape. Therefore, the slight left skew is not a cause for concern: ‘SWS’ is close enough to normally distributed. Still, this is not certain, so we can look at a normal quantile plot. *
+
+*The normal quantile plot of Social Welfare Score appears approximately linear, which suggests that SWS is approximately normally distributed. The “stair step” pattern in the plot results from the discrete whole number data values, which is expected for ´SWS´. Moreover, the accumulation of values at SWS = 20 (quantiles [2, 4]) is characteristic of the truncated distribution, as described below the histogram. Hence, ´SWS´ appears to be a nice response variable.*
+
+### CASE STUDY 2: Does you attitude towards social welfare depend on your relationship to a police officer?
+#### *Use of boxplots, t-tests, bootstrap confidence intervals and permutation tests*
+
+To begin examining the relationship between Social Welfare Score and whether the respondent knows a police officer or not, we created a box plot and labeled the group means. (To clarify, here we define “knowing a policeman” as having a policeman as a close friend or family member.)
+
+```{r, echo = F}
+boxplot(SWS ~ policeFrF, 
+        main = "Social Welfare Score by Knowing a Police Officer", 
+        col = c("green", "yellow"), cex.main = 0.9,
+        ylab = "Police officer as friend / family?", 
+        xlab = "Social Welfare Score", horizontal = T, axes = F)
+axis(1)
+axis(side = 2, at = c(1, 2), labels = c("Yes", "No"))
+means <- tapply(SWS, policeFrF, mean) 
+points(x = means, y = c(1:2), col = "red", pch = 19, cex = 1.2)
+text(x = means + 0.9, y = c(1:2), labels = round(means, 1), cex = 0.8)
+```
+
+*In the boxplot, we observe a higher mean SWS in respondents who do not know a policeman (color yellow; mean 14.6) than ones who do know one (green; 13.8) even though there is substantial overlap in the ranges and interquartile ranges of each group. We are tempted to think there might be a difference in the means of ´SWS´ in each group, but a t-test will determine if the difference in means between the groups is in fact statistically significant. *
+
+First, we should do a t-test:
+```{r}
+#We do a sample t-test
+(test1 <- t.test(SWS ~ policeFrF))
+
+```
+
+Since the 95% confidence interval for the true difference in means (-0.94, -0.65) does not contain 0, and the p-value is much less than 0.05 (5.98 x 10^-26), we reject the null hypothesis that there is no difference in the mean social welfare score between people who know a policeman and people who do not. Likewise, since the mean difference is negative, we conclude that there is a statistically significant higher mean social welfare score for people who do not know a police officer relative to those who do. 
+
+To substantiate our 95% confidence interval, we bootstrap the difference in means based on the ‘policeFrF’ groups. 
+
+```{r, echo = F}
+N <- 10000
+diffscore <- rep(NA, N)
+set.seed(230)    #This is so we get same results every time
+
+for (i in 1:N) {
+  #sample means of FRIENDS
+  sF <- sample(SWS[policeFrF == "Close Friend / Family"], 
+               sum(policeFrF == "Close Friend / Family"), replace = T)
+  
+  #sample means of NOT FRIEND
+  sNF <- sample(SWS[policeFrF == "Not in relationship"], 
+                sum(policeFrF == "Not in relationship"), replace = T)
+
+  #difference in mean scores for being a friend or not
+  diffscore[i] <- mean(sF) - mean(sNF)
+}
+
+boot_ci <- quantile(diffscore, c(0.025, 0.975))
+paste0("Boot CI: (", round(boot_ci[1], 2), ", ", round(boot_ci[2], 2), ")")
+
+#Make histogram of bootstrap sample means
+hist(diffscore, col = "blue", 
+     main = "Bootstrapped Sample Means Diff in Scores", 
+     xlab = "Social Welfare Score Difference", breaks = 50)
+#Add lines to histogram for CI's
+abline(v = boot_ci, lwd = 3, col = "red")
+abline(v = test1$conf.int, lwd = 3, col = "green", lty = 2)
+legend("topright", c("Original CI","Boot CI"), lwd = 3, 
+       col = c("green","red"), lty = c(2,1))
+```
+
+*The original and bootstrapped confidence intervals are almost identical: to the nearest hundredth place, both are (-0.94, -0.65). The likeness of these confidence intervals is not surprising, given that the number of observations (7607; see Data Cleaning III) approaches the number of bootstrapped samples (10,000). Therefore, bootstrapping confirms the statistically significant higher mean SWS score of those who do not know a police officer relative to those who do.  *
+
+To further substantiate the claim that there is a statistically significant difference in mean SWS between the ‘policeFrF’ groups, we now proceed with a permutation test: 
+
+```{r, echo = F}
+#Get actual mean differences
+(actualdiff <- by(SWS, policeFrF, mean))
+
+(actualdiff <- actualdiff[1] - actualdiff[2])
+
+#STEP 2: Under the null hypothesis, sample from each group (and calculate the test statistic, median) as if there was no distinction.
+
+N <- 10000
+diffvals <- rep(NA, N)
+for (i in 1:N) {
+  fakeGROUP <- sample(policeFrF) 
+  diffvals[i] <- mean(SWS[fakeGROUP == "Close Friend / Family"]) -  mean(SWS[fakeGROUP == "Not in relationship"])
+}
+
+#STEP 3: Compare our actual difference in sample means to this distribution.
+#Make histogram of permuted mean differences
+
+hist(diffvals, col = "yellow", 
+     main = "Social Welfare Score Permuted \n Sample Means Difference", 
+     xlab = "Mean differences", breaks = 50, xlim = c(-1,0.5))
+abline(v = actualdiff, col = "blue", lwd = 3)
+text(actualdiff - 0.05, 200, paste("Actual Diff. in Means =", round(actualdiff,2)), srt = 90)
+
+#We now calculate 'extremeness' (p-value):
+paste0("Two-sided p-value for difference in means: ", 
+       mean(abs(diffvals) >= abs(actualdiff)))
+```
+
+*The actual difference in sample means, -0.79, lies well outside the distribution of permuted sample means. Furthermore, the p-value of approximately 0 indicates that there was virtually no way for the actual difference in means to have occurred by random chance (because it’s lower than 0.01).  Therefore, we reject the null hypothesis that there is no difference in mean SWS between ‘policeFrF’ groups and conclude that there is a statistically significant higher mean SWS score for those who do not know a police officer relative to those who do: respondents who know a police officer have statistically significantly lower mean SWS than those who do NOT know a police officer.*
+
+This effect could in fact be a masked version of left-right politics; or it could reflect something about the worldview of police officers and, by extension, those who have them in their social circles; or something else entirely. However, we acknowledge that this variable defines two very broad categories. In a future project, we could explore the difference between having a close relative who is a police officer and being friends with a police officer, since a person holds agency in choosing close friends, but one does not choose their family. 
+
+### CASE STUDY 3: Is the Social Welfare Score different among the selected countries?
+#### *Use of boxplots, ANOVA, Tukey confidence intervals, and residual plots*
+
+To determine whether SWS differs among certain selected countries, we first create a boxplot and label the sample means.
+
+```{r, echo = FALSE}
+#boxplots of Social Welfare Score by Country
+par(mar = c(5, 8, 4, 2), las = 1)
+boxplot(SWS ~ social$country, col = "pink", 
+        main = "Social Welfare Score by Country", 
+        xlab = "Social Welfare Score", ylab = "Country", cex.axis = 0.7,
+        horizontal = T)
+means1 <- tapply(SWS, social$country, mean) 
+points(x = means1, y = c(1:9), col = "red", pch = 19, cex = 1.2)
+text(x = means1 + 1.1 , y = c(1:9), labels = round(means1, 1), cex = 0.6)
+```
+
+*Most of the mean SWS scores appear to differ substantially from one another, except for Mexico, Germany, India, and Japan. Also, the interquartile ranges do not appear to differ substantially between groups. Finally, based on the few outliers on the low end, one can imagine that the distribution of SWS within each country is like that of the overall distribution of SWS (truncated normal with upper bound).*
+```{r}
+sds <- tapply(SWS, social$country, sd)
+paste0("Ratio of Max/Min SD: ", round(max(sds)/min(sds), 1))
+```
+*Since the ratio of largest to smallest standard deviations is 1.6, which is less than the typical threshold of 2, it is reasonable to assume that the standard deviations of SWS are equal across countries.*
+
+Having determined that the ANOVA assumptions are reasonably met, we now create an ANOVA model to compare the mean SWS between countries.
+
+```{r}
+aov1 <- aov(SWS ~ social$country)
+summary(aov1)
+```
+
+Given that the p-value for this ANOVA is well under 0.05 (<2e-16), we can reject the null hypothesis of equal means and conclude that there is a statistically significant difference in mean SWS across countries. 
+
+To better understand these differences, we now calculate the Tukey confidence intervals to compare all pairs of SWS means across countries and plot the results.
+
+```{r, include = F}
+#Tukey's "Honest Significant Difference"
+(tukeyaov <- TukeyHSD(aov1))
+```
+
+```{r, echo = FALSE}
+par(mar=c(5, 11, 4, 0.5), cex = 0.9)
+par(cex.axis = 0.5)
+plot(tukeyaov, las = 1)
+```
+*The Tukey confidence intervals find that India-Germany, Japan-Germany, Mexico-Germany, Japan-India, Mexico-India and Mexico-Japan, which all had p-values greater than 0.05 and confidence intervals that contained zero, do not have statistically significant differences in mean SWS. All the other pairs of countries do have statistically significant differences in mean SWS. One notable pair is United States-Russia; the higher mean SWS of Russia is expected since it developed under socialism, while the U.S. developed under capitalism. Another notable pair is Mexico-Australia, two countries with completely different cultures and in different geographical regions.*
+
+We now evaluate model assumptions — i.e., that the errors are normally distributed with mean zero and that there is no distinctive pattern in the fits vs. residuals plot. 
+
+```{r, echo = F}
+par(cex.main = 0.9)
+myResPlots2(aov1, label = "'SWS' by country")
+```
+
+*The NQ plot appears approximately linear; the accumulation of points in the top right (SWS = 20, norm quantiles in [3, 4]) is a result of the truncated normal distribution of SWS, as discussed in Case Study I. Therefore, the first assumption of ANOVA is met. *
+
+*The plot of fits vs residuals appears to have some outliers (studentized residuals > 2); however, they aren’t of concern since the points within each vertical line have a very similar spread (they follow the same pattern) and there are over 7000 observations in this scaled dataset. The striation is a result of our response variable being contained to discrete whole number values, and each vertical line represents the means ´SWS´ of each selected country (hence, 9 lines for 9 countries). With no evidence of  heteroskedasticity nor non-linear trends, we conclude that this model has reasonably good fit.*
+
+In this third case study, we used ANOVA in conjunction with Tukey confidence intervals to show that there are statistically significant differences in ´SWS´ across all countries other than India, Germany, Mexico, and Japan, all of which did not have statistically significant differences in SWS with each other. This apparent similarity between the four countries is interesting, but since we merely failed to reject the null hypothesis, we need to conduct more research before we can make a substantive conclusion.
+
+
+### CASE STUDY 4: How to create a model to predict the Social Welfare Score?
+#### *Use of multiple regression and corresponding techniques*
+
+#### Description of plan:
+We now proceed to model the Social Welfare Score via multiple regression. In doing so, we attempted to predict the response variable of ‘SWS’ by the variables of ‘AGE’, ‘health’, ‘PARTY_LR’, ‘satisfied’, and ‘policeFrF’. Since we’ve previously determined that SWS is roughly normally distributed, we did not do a response variable transformation. We will perform best subsets regression using the ´regsubsets´ function in the ´leaps´ package. Following the examples in classes 13-15, we will choose as our final model the one with the highest adjusted R-squared; then, we will compare the results by choosing the one with the smallest BIC (Bayesian Information Criteria) to get the model with “best” R-squared.
+
+```{r}
+#We create 'social3' to have a mix of continuous variables we thought were interesting to see if they were significant predictors of Social Welfare.
+social3 <- social[, c("SWS", "AGE", "health", "PARTY_LR", "satisfied")]
+```
+
+#### Best Subsets Regression for Social Welfare Score:
+
+
+```{r}
+#Perform best subsets regression 
+mod <- regsubsets(SWS ~ ., data = social3, nvmax = 4)
+modsum <- summary(mod)
+modsum$which
+```
+We note that PARTY_LR is the only predictor variable present in all five models. This is not surprising, since of all the continuous predictors, it had the strongest correlation with SWS in Case Study 1.
+
+We then determined which model had the highest adjusted R-squared value. 
+
+
+```{r}
+#row number in `mod2sum$which` for the model with the highest ADJUSTED r-squared.
+modnum_adjr2 <- which.max(modsum$adjr2) 
+
+#variable names for predictors that ended up in this model
+names(social3)[modsum$which[modnum_adjr2, ]][-1]
+
+#temporary dataset called `social3_adjr2` which has the columns of `social3`
+social3_adjr2 <- social3[ ,modsum$which[modnum_adjr2, ]]
+
+#fit the model and return summary information for the model
+sws_lm_adjr2 <- lm(SWS ~ ., data = social3_adjr2)
+summary(sws_lm_adjr2)
+```
+
+*The variables in the model with the highest adjusted R-squared value are ‘PARTY_LR’, ‘Satisfied’, and ‘health’. Per their p-values (all on the order of 10^-6 or below), all four predictor values are highly significant (all were way less than 0.05). The variables of ‘health’, ‘PARTY_LR’, and ‘satisfied’ were all negatively related to the response variable of ‘SWS’. This means that as these variables increased, the response variable decreased. For instance, if the ´health´, ´PARTY_LR´, and ´satisfied´ scales increased by 1, the ´SWS´ will decrease by 0.174, 0.66, and 0.237, respectively; it is impressive to note that the highest negative coefficient, corresponds to whether the person beliefs in left or right policies, which shows how much the idea social welfare changes depending on the party. Additionally, it is also interesting that generally doing better in life (more satisfied and better health) is correlated with less interest in the distribution of resources to others. We acknowledge that there may be an issue of multicollinearity between 'health' and 'satisfied' due to their statistically significant positive correlation as established in Case Study I, since both predictors are significant we leave them in the model. The multiple R-squared for the model is 0.06173, which means that 6% of the variability in ‘SWS’ is described by the 3 significant predictors; this is not a poor model because all predictors are significant and this is a social questionnaire analysis, which tend to result is low R-squared. This simply means that most of the variability in people’s responses is due to other factors. In a future project, we could fit a more complicated model with more predictors.*
+
+```{r, echo = F}
+par(cex.main = 0.9)
+myResPlots2(sws_lm_adjr2, label = "Modeling SWS regression")
+```
+*The normal quantile plot of studentized residuals appears to be approximately linear which means that the data is approximately normal. The short upper tail and  “squiggles” or curves on both ends are expected due to the truncation of the data and the data having only discrete values. With an approximate fit that follows the 95% confidence interval, the blue bound, the residuals are reasonably close to normally-distributed. *
+
+*The plot of Fits vs. Studentized Residuals has 17 slashed lines because the scale of SWS has 17 discrete values (from 4 to 20). The stripes  are also expected because since each response is quantized to the nearest integer. Furthermore, the stripes are diagonal since a fitted value is being subtracted from each discrete whole number y value: tracing that out for all of the fitted values results in a diagonal line. Finally, the outliers (above the green line) are not an issue because they follow this continuous pattern and because the number of observations is very high.*
+
+*Model with lowest BIC (after doing the code):*
+```{r, echo = F}
+#row number in `modsum$which` for the model with the lowest BIC.
+modnum_bic <- which.min(modsum$bic) 
+
+#variable names for predictors that ended up in this model
+names(social3)[modsum$which[modnum_bic, ]][-1]
+```
+We can stop here because we see that the BIC criterion  agrees with the adjusted R-squared criterion.. Thus, determining the model of choice to be the model with the three predictor variables of ‘PARTY_LR’, ‘Satisfied’, and  ‘health’.
+
+Our fourth case study used multiple regression to conclude that political party, life satisfaction, and general health status are all statistically significant predictors. 
+
+
+## Part IV: Conclusions, Summary, and Future Directions
+
+In conclusion, we employed various statistical tests and visualizing techniques to understand relationships between various demographics and beliefs, ultimately to create a regression model for attitude towards social welfare. We calculated correlations between our seven continuous variables and followed up with correlation tests between ‘health’ and ‘satisfied’ as well as between ‘PARTY_LR’ and ‘SWS’; both of these correlations were confirmed as statistically significant. We then established two statistically significant relationships between our two categorical variables – ‘policeFrF’ and ‘country’ – and composite social welfare score via bootstrapping and a permutation test (for the former) and ANOVA and Tukey confidence intervals (for the latter). We finally fit a multiple regression model for SWS using best subsets regression, and by both parameters of highest adjusted R-squared and lowest BIC value, the model with predictors ‘health’, ‘satisfied’, and ‘PARTY_LR’ proved most suitable. Future research directions could include accounting for possible interaction effects, considering other demographic factors (such as sex or membership in a labor union), and considering other attitudinal factors (such as trust in private companies). These could lend more predictive power to our regression model and a more robust understanding of the factors that shape attitudes towards social welfare. 
+
+
+
